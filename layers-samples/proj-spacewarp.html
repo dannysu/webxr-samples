@@ -38,12 +38,12 @@ CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
     <details open>
       <summary>Space Warp</summary>
       <p>
-        This sample demonstrates the space warp technology. It allows the
-        application to run at half the rate from the actual display refresh
-        rate. For this to work, the application needs to render a motion vector
-        buffer and a depth buffer. These are used by the system to
-        synthesize new frames, so that the resulting frame rate is still at the
-        proper refresh rate.
+        Space Warp allows the application to run at half the actual display
+        refresh rate. For this to work, the application needs to render a
+        motion vector buffer and a depth buffer. These are used by the system
+        to synthesize new frames, so that the resulting frame rate is still at
+        the proper refresh rate. Use trigger to turn space warp on/off. Squeeze
+        to turn delta pose on/off. Joystick to rotate view.
         <a class="back" href="./">Back</a>
       </p>
       <p id="mv-status"></p>
@@ -200,9 +200,6 @@ CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
       }
       window.addEventListener('resize', onResize);
       onResize();
-
-      // Set up a non-black clear color so that we can see if something renders wrong.
-      gl.clearColor(0.1, 0.2, 0.3, 1.0);
     }
 
     function onRequestSession() {
@@ -401,6 +398,20 @@ CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
           processThumbstickInput(session, frame, thumbstick);
         }
       });
+
+      // Use different colors to indicate whether space warp and delta pose are on
+      if (spaceWarpEnabled && deltaPoseEnabled) {
+        gl.clearColor(0.1, 0.2, 0.3, 1.0);
+      } else if (spaceWarpEnabled) {
+        // red color if space warp is on, but delta pose is not
+        gl.clearColor(0.3, 0.1, 0.1, 1.0);
+      } else if (deltaPoseEnabled) {
+        // green color is space warp is off, but delta pose is on
+        gl.clearColor(0.1, 0.3, 0.1, 1.0);
+      } else {
+        // orange brown color if neither is on
+        gl.clearColor(0.3, 0.2, 0.1, 1.0);
+      }
 
       if (pose) {
         if (!previousPoseInWorld) {
