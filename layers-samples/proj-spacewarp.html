@@ -83,6 +83,7 @@ CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
     let rotationDeltaQuat = quat.create();
     let invPosition = vec3.create();
     let invOrientation = quat.create()
+    let headingOrientation = quat.create();
 
     // WebGL scene globals.
     let gl = null;
@@ -95,10 +96,24 @@ CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 
     // SpaceWarp globals.
     let spaceWarpEnabled = true;
+    let deltaPoseEnabled = true;
     let xrMotionFramebuffer = null;
     let motionRenderer = null;
     let motionScene = new Scene();
     const prevMatrices = {};
+    let currentPoseInWorld = null;
+    let previousPoseInWorld = null;
+    const prevPositionInv = vec3.create();
+    const prevOrientationInv = quat.create();
+
+    const qQuat = quat.create();
+    const aqQuat = quat.create();
+    const aConj = quat.create();
+    const aqaConj = quat.create();
+
+    const tmpOrientation = quat.create();
+    const tmpPosition = vec3.create();
+    const currentOrientation = quat.create();
 
     scene.addNode(new CubeSeaNode({
       imageUrl: '../media/textures/cube-sea.png',
@@ -208,6 +223,22 @@ CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
           {x: invPosition[0], y: invPosition[1], z: invPosition[2]},
           {x: invOrientation[0], y: invOrientation[1], z: invOrientation[2], w: invOrientation[3]});
 
+        quat.identity(headingOrientation);
+        quat.rotateY(headingOrientation, headingOrientation, trackingSpaceHeadingDegrees * Math.PI / 180);
+        currentPoseInWorld = new XRRigidTransform(
+          new DOMPointReadOnly(
+            trackingSpaceOriginInWorldSpace[0],
+            trackingSpaceOriginInWorldSpace[1],
+            trackingSpaceOriginInWorldSpace[2],
+          ),
+          new DOMPointReadOnly(
+            headingOrientation[0],
+            headingOrientation[1],
+            headingOrientation[2],
+            headingOrientation[3],
+          ),
+        );
+
         // Update offset reference to use a new originOffset with the teleported
         // player position and orientation.
         // This new offset needs to be applied to the base ref space.
@@ -252,6 +283,16 @@ CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
       }
     }
 
+    function onSqueeze(ev) {
+      if (deltaPoseEnabled) {
+        deltaPoseEnabled = false;
+        console.log('Turned off delta pose');
+      } else {
+        deltaPoseEnabled = true;
+        console.log('Turned on delta pose');
+      }
+    }
+
     function processThumbstickInput(session, frame, thumbstick) {
       if (thumbstick.values.xAxis !== 0) {
         rotate(session, frame, -1 * thumbstick.values.xAxis);
@@ -273,6 +314,7 @@ CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
     function onSessionStarted(session) {
       session.addEventListener('end', onSessionEnded);
       session.addEventListener('select', onSelect);
+      session.addEventListener('squeeze', onSqueeze);
       session.addEventListener('inputsourceschange', onInputSourcesChange);
 
       initGL();
@@ -312,9 +354,39 @@ CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
       xrButton.setSession(null);
     }
 
+    function quaternionRotate(out, a, v) {
+      quat.set(qQuat, v[0], v[1], v[2], 0);
+      quat.multiply(aqQuat, a, qQuat);
+      quat.conjugate(aConj, a);
+      quat.multiply(aqaConj, aqQuat, aConj);
+      out[0] = aqaConj[0];
+      out[1] = aqaConj[1];
+      out[2] = aqaConj[2];
+    }
+
+    function multiplyPrevPose(currPose) {
+      quat.set(currentOrientation, currPose.orientation.x, currPose.orientation.y, currPose.orientation.z, currPose.orientation.w);
+      quat.multiply(tmpOrientation, prevOrientationInv, currentOrientation);
+      vec3.set(tmpPosition, currPose.position.x, currPose.position.y, currPose.position.z);
+      quaternionRotate(tmpPosition, prevOrientationInv, tmpPosition);
+      const position = new DOMPointReadOnly(
+        tmpPosition[0] + prevPositionInv[0],
+        tmpPosition[1] + prevPositionInv[1],
+        tmpPosition[2] + prevPositionInv[2],
+      );
+      const orientation = new DOMPointReadOnly(tmpOrientation[0], tmpOrientation[1], tmpOrientation[2], tmpOrientation[3]);
+      return new XRRigidTransform(position, orientation);
+    }
+
+    function inversePrevPose(prevPose) {
+      quat.set(tmpOrientation, prevPose.orientation.x, prevPose.orientation.y, prevPose.orientation.z, prevPose.orientation.w);
+      quat.conjugate(prevOrientationInv, tmpOrientation);
+      vec3.set(tmpPosition, -prevPose.position.x, -prevPose.position.y, -prevPose.position.z);
+      quaternionRotate(prevPositionInv, prevOrientationInv, tmpPosition);
+    }
+
     function onXRFrame(t, frame) {
       let session = frame.session;
-      session.renderState.layers[0].deltaPose = null;
       let pose = frame.getViewerPose(xrImmersiveRefSpaceOffset);
 
       scene.startFrame();
@@ -331,6 +403,21 @@ CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
       });
 
       if (pose) {
+        if (!previousPoseInWorld) {
+          previousPoseInWorld = currentPoseInWorld;
+        }
+        if (deltaPoseEnabled) {
+          if (previousPoseInWorld != currentPoseInWorld) {
+            inversePrevPose(previousPoseInWorld);
+            session.renderState.layers[0].deltaPose = multiplyPrevPose(currentPoseInWorld);
+          } else {
+            session.renderState.layers[0].deltaPose = null;
+          }
+        } else {
+          session.renderState.layers[0].deltaPose = null;
+        }
+        previousPoseInWorld = currentPoseInWorld;
+
         let glLayer = null;
 
         const views = [];
