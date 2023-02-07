@@ -50,6 +50,58 @@ class StatsMaterial extends Material {
     }`;
   }
 
+  get vertexSourceMultiview() {
+    return `#version 300 es
+    #extension GL_OVR_multiview2 : require
+    #define NUM_VIEWS 2
+    layout(num_views=NUM_VIEWS) in;
+    #define VIEW_ID gl_ViewID_OVR
+    in vec3 POSITION;
+    in vec3 COLOR_0;
+
+    out vec4 vColor;
+
+    vec4 vertex_main(mat4 left_proj, mat4 left_view, mat4 right_proj, mat4 right_view, mat4 model) {
+      vColor = vec4(COLOR_0, 1.0);
+      return (VIEW_ID == 0u) ? left_proj * left_view * model * vec4(POSITION, 1.0) :
+                               right_proj * right_view * model * vec4(POSITION, 1.0);
+    }`;
+  }
+
+  get vertexSourceSpacewarp() {
+    return `#version 300 es
+    #extension GL_OVR_multiview2 : require
+    #define NUM_VIEWS 2
+    layout(num_views=NUM_VIEWS) in;
+    #define VIEW_ID gl_ViewID_OVR
+    in vec3 POSITION;
+    out highp vec4 clipPos;
+    out highp vec4 prevClipPos;
+
+    vec4 vertex_main(
+      mat4 left_proj,
+      mat4 left_view,
+      mat4 right_proj,
+      mat4 right_view,
+      mat4 model,
+      mat4 prev_left_proj,
+      mat4 prev_left_view,
+      mat4 prev_right_proj,
+      mat4 prev_right_view,
+      mat4 prev_model
+    ) {
+      if (VIEW_ID == 0u) {
+        clipPos = left_proj * left_view * model * vec4(POSITION, 1.0);
+        prevClipPos = prev_left_proj * prev_left_view * prev_model * vec4(POSITION, 1.0);
+        return clipPos;
+      } else {
+        clipPos = right_proj * right_view * model * vec4(POSITION, 1.0);
+        prevClipPos = prev_right_proj * prev_right_view * prev_model * vec4(POSITION, 1.0);
+        return clipPos;
+      }
+    }`;
+  }
+
   get fragmentSource() {
     return `
     precision mediump float;
@@ -57,6 +109,28 @@ class StatsMaterial extends Material {
 
     vec4 fragment_main() {
       return vColor;
+    }`;
+  }
+
+  get fragmentSourceMultiview() {
+    return `#version 300 es
+    precision mediump float;
+    in vec4 vColor;
+
+    vec4 fragment_main() {
+      return vColor;
+    }`;
+  }
+
+  get fragmentSourceSpacewarp() {
+    return `#version 300 es
+    precision highp float;
+    in highp vec4 clipPos;
+    in highp vec4 prevClipPos;
+
+    vec4 fragment_main() {
+      highp vec4 motionVector = ( clipPos / clipPos.w - prevClipPos / prevClipPos.w );
+      return motionVector;
     }`;
   }
 }
